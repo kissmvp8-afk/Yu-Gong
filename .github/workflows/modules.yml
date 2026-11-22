@@ -1,0 +1,48 @@
+# The public module library's checks (see README.md).
+#   pull requests: a shared module may only ADD one file under modules/, and it must pass the checks; the owner still reviews it.
+#   main: after a merge, index.json is rebuilt and committed, so every app sees the new module.
+name: modules
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  check:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: '24'
+      - name: Only new module files
+        run: |
+          changed=$(git diff --name-status "origin/${{ github.base_ref }}...HEAD")
+          echo "$changed"
+          if echo "$changed" | grep -vqE '^A[[:space:]]+modules/m-[0-9a-f]{16}\.json$'; then
+            echo "A shared module may only add files named modules/<id>.json"; exit 1
+          fi
+      - name: Check every module
+        run: node build-index.mjs --check
+  index:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: '24'
+      - name: Rebuild index.json
+        run: node build-index.mjs
+      - name: Commit index.json if it changed
+        run: |
+          git config user.name "module-index"
+          git config user.email "module-index@users.noreply.github.com"
+          git add index.json
+          git diff --cached --quiet || (git commit -m "Update index.json" && git push)
