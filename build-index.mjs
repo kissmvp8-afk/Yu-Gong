@@ -11,7 +11,7 @@
 // which the app checks before using it.
 //
 // A role file (a user's shared requirements for planning, writing or checking; desktop/src/custom-roles.js) is
-// {format: 1, id, name, summary, steps, prompt, ai: null}: steps among plan / write / review, the prompt at most 4000 characters,
+// {format: 1, id, name, summary, steps, prompt, ai: null}: steps among plan / write / review (or one extra job: act / check), the prompt at most 4000 characters,
 // no fixed AI, nothing that looks like a key or a password, and an id that is the sha256 of its content. Its file name is its id.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -21,7 +21,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const DIR = path.join(ROOT, 'modules');
 const ROLES = path.join(ROOT, 'roles');
-const STEPS = ['plan', 'write', 'review'];
+const STEPS = ['plan', 'write', 'review', 'act', 'check'];
 const LIMITS = { files: 200, bytes: 2 * 1024 * 1024, name: 60, summary: 300, tags: 8, tag: 20, criteria: 10, criterion: 300 };
 const SECRETS = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
@@ -96,8 +96,9 @@ function checkRole(name) {
     for (const re of SECRETS) if (re.test(role[key])) fail(file, key + ' still contains something that looks like a key or a password');
   }
   if (!Array.isArray(role.steps) || !role.steps.length || role.steps.join() !== STEPS.filter(s => role.steps.includes(s)).join()) {
-    fail(file, 'steps must be some of plan, write, review, in that order');
+    fail(file, 'steps must be some of plan, write, review, act, check, in that order');
   }
+  if (role.steps.some(s => s === 'act' || s === 'check') && role.steps.length !== 1) fail(file, 'an extra job (act or check) is its only step');
   // the same id as the app (desktop/src/custom-roles.js idOf)
   const id = 'r-' + sha256(JSON.stringify({ ai: null, name: role.name, prompt: role.prompt, steps: role.steps, summary: role.summary })).slice(0, 16);
   if (role.id !== id || name !== id + '.json') fail(file, 'the id does not match the content');
