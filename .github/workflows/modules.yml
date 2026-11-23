@@ -1,5 +1,6 @@
-# The public module library's checks (see README.md).
-#   pull requests from a fork (a shared module): may only ADD files under modules/; every pull request must pass the module checks;
+# Copy to .github/workflows/modules.yml in the Yu-Gong repository (see README.md).
+#   pull requests from a fork (a shared module or role): may only ADD files under modules/ or roles/; every pull request must pass
+#   the checks;
 #   the owner still reviews every one. A pull request from a branch of this repository (only people with write access can push one)
 #   may change other files too, such as this workflow or the README.
 #   main: after a merge, index.json is rebuilt and committed, so every app sees the new module.
@@ -21,15 +22,15 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
         with:
           node-version: '24'
-      - name: Only new module files (pull requests from a fork)
+      - name: Only new module or role files (pull requests from a fork)
         if: github.event.pull_request.head.repo.full_name != github.repository
         run: |
           changed=$(git diff --name-status "origin/${{ github.base_ref }}...HEAD")
           echo "$changed"
-          if echo "$changed" | grep -vqE '^A[[:space:]]+modules/m-[0-9a-f]{16}\.json$'; then
-            echo "A shared module may only add files named modules/<id>.json"; exit 1
+          if echo "$changed" | grep -vqE '^A[[:space:]]+(modules/m-[0-9a-f]{16}|roles/r-[0-9a-f]{16})\.json$'; then
+            echo "A shared module or role may only add files named modules/<id>.json or roles/<id>.json"; exit 1
           fi
-      - name: Check every module
+      - name: Check every module and role
         run: node build-index.mjs --check
   index:
     if: github.event_name == 'push'

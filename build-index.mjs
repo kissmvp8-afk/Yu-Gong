@@ -1,14 +1,18 @@
 #!/usr/bin/env node
-// The public module library's index builder and checker (this repository; its source is super-agent's module-library/;
+// The public module library's index builder and checker (copy of this folder goes into the owner's `Yu-Gong` repository;
 // see README.md). No dependencies, no network.
 //
-//   node build-index.mjs            check every modules/*.json and write index.json
+//   node build-index.mjs            check every modules/*.json and roles/*.json, and write index.json
 //   node build-index.mjs --check    check only (used on every pull request); exit 1 on the first problem
 //
 // A module file must be exactly what the Super Agent desktop app produces (desktop/src/library.js validatePackage): format 1, an id
 // that is the sha256 of its content, safe relative paths, at most 200 files and 2 MB, and nothing that still looks like a key or a
 // password (desktop/src/share.js leftovers). Its file name must be its id. index.json lists each module with the sha256 of its file,
 // which the app checks before using it.
+//
+// A role file (a user's shared requirements for planning, writing or checking; desktop/src/custom-roles.js) is
+// {format: 1, id, name, summary, steps, prompt, ai: null}: steps among plan / write / review, the prompt at most 4000 characters,
+// no fixed AI, nothing that looks like a key or a password, and an id that is the sha256 of its content. Its file name is its id.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -16,6 +20,8 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const DIR = path.join(ROOT, 'modules');
+const ROLES = path.join(ROOT, 'roles');
+const STEPS = ['plan', 'write', 'review'];
 const LIMITS = { files: 200, bytes: 2 * 1024 * 1024, name: 60, summary: 300, tags: 8, tag: 20, criteria: 10, criterion: 300 };
 const SECRETS = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
@@ -75,11 +81,36 @@ function check(name) {
   return { id, name: pkg.name, summary: pkg.summary, tags: pkg.tags, path: 'modules/' + name, sha256: sha256(raw) };
 }
 
+function checkRole(name) {
+  const file = path.join('roles', name);
+  if (!/^r-[0-9a-f]{16}\.json$/.test(name)) fail(file, 'the file name must be the role id');
+  const raw = fs.readFileSync(path.join(ROLES, name));
+  if (raw.length > 64 * 1024) fail(file, 'larger than 64 KB');
+  let role;
+  try { role = JSON.parse(raw.toString('utf8')); } catch { fail(file, 'not JSON'); }
+  if (!role || Object.keys(role).sort().join() !== 'ai,format,id,name,prompt,steps,summary' || role.format !== 1) fail(file, 'not a role file');
+  if (role.ai !== null) fail(file, 'a shared role must not fix an AI');
+  for (const [key, limit] of [['name', 60], ['summary', 300], ['prompt', 4000]]) {
+    text(file, role[key], limit, key);
+    if (role[key] !== role[key].trim()) fail(file, key + ' has spaces around it');
+    for (const re of SECRETS) if (re.test(role[key])) fail(file, key + ' still contains something that looks like a key or a password');
+  }
+  if (!Array.isArray(role.steps) || !role.steps.length || role.steps.join() !== STEPS.filter(s => role.steps.includes(s)).join()) {
+    fail(file, 'steps must be some of plan, write, review, in that order');
+  }
+  // the same id as the app (desktop/src/custom-roles.js idOf)
+  const id = 'r-' + sha256(JSON.stringify({ ai: null, name: role.name, prompt: role.prompt, steps: role.steps, summary: role.summary })).slice(0, 16);
+  if (role.id !== id || name !== id + '.json') fail(file, 'the id does not match the content');
+  return { id, name: role.name, summary: role.summary, steps: role.steps, path: 'roles/' + name, sha256: sha256(raw) };
+}
+
 const names = fs.existsSync(DIR) ? fs.readdirSync(DIR).filter(n => !n.startsWith('.')).sort() : [];
 const modules = names.map(check);
+const roleNames = fs.existsSync(ROLES) ? fs.readdirSync(ROLES).filter(n => !n.startsWith('.')).sort() : [];
+const roles = roleNames.map(checkRole);
 if (process.argv.includes('--check')) {
-  console.log('ok: ' + modules.length + ' modules');
+  console.log('ok: ' + modules.length + ' modules, ' + roles.length + ' roles');
 } else {
-  fs.writeFileSync(path.join(ROOT, 'index.json'), JSON.stringify({ format: 1, modules }, null, 1) + '\n');
-  console.log('index.json: ' + modules.length + ' modules');
+  fs.writeFileSync(path.join(ROOT, 'index.json'), JSON.stringify({ format: 1, modules, roles }, null, 1) + '\n');
+  console.log('index.json: ' + modules.length + ' modules, ' + roles.length + ' roles');
 }
